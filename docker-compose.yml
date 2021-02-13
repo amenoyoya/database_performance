@@ -1,0 +1,113 @@
+version: "3"
+
+networks:
+  # プロジェクト内仮想ネットワーク
+  ## 同一ネットワーク内の各コンテナはサービス名で双方向通信可能
+  lampnet:
+    driver: bridge
+    # ネットワークIP範囲を指定する場合
+    # ipam:
+    #   driver: default
+    #   config:
+    #     # 仮想ネットワークのネットワーク範囲を指定
+    #     ## 172.68.0.0/16 の場合、172.68.0.1 ～ 172.68.255.254 のIPアドレスを割り振れる
+    #     ## ただし 172.68.0.1 はゲートウェイに使われる
+    #     - subnet: 172.68.0.0/16
+
+volumes:
+  # dbコンテナ永続化用ボリュームコンテナ
+  db-data:
+    driver: local
+
+services:
+  # web service container: php + apache
+  web:
+    build: ./docker/web/
+    logging:
+      driver: json-file
+    # restart: always
+    # 所属ネットワーク
+    networks:
+      - lampnet
+    # ポートフォワーディング
+    ports:
+      # http://localhost:${WEB_PORT} => service://web:80
+      - "${WEB_PORT:-8000}:80"
+    volumes:
+      # ~www-data: host://./www/ => docker://web:/var/www/
+      ## DocumentRoot: host://./www/app/public/ => docker://web:/var/app/public/
+      - ./www/:/var/www/
+      # 設定ファイル
+      - ./docker/web/conf/000-default.conf:/etc/apache2/sites-available/000-default.conf
+      - ./docker/web/conf/php.ini:/etc/php.d/php.ini
+    environment:
+      # USER_ID: www-data のユーザIDを docker 実行ユーザIDに合わせたい場合に利用 (export USER_ID=$UID)
+      ## ユーザIDを合わせないと ./www/ (docker://web:/var/www/) 内のファイル編集が出来なくなる
+      UID: ${USER_ID}
+      # Composer設定
+      COMPOSER_ALLOW_SUPERUSER: 1 # root権限での実行を許可
+      COMPOSER_NO_INTERACTION: 1  # 非対話的にインストール
+      # MySQL接続設定
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_DATABASE: database
+      # TimeZone設定
+      TZ: Asia/Tokyo
+  
+  # db service container: MySQL server
+  db:
+    image: mysql:5.7
+    logging:
+      driver: json-file
+    # restart: always
+    # 所属ネットワーク
+    networks:
+      - lampnet
+    volumes:
+      # データ永続化: docker-volume.db-data => docker.db:/var/lib/mysql
+      - db-data:/var/lib/mysql
+      # MySQL設定ファイル: host:/./docker/db/my.cnf => /etc/mysql/conf.d/my.cnf 644
+      - ./docker/db/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      # 初回投入データ: ./docker/db/initdb.d/
+      # - ./docker/db/initdb.d/:/docker-entrypoint-initdb.d/
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: database
+      # TimeZone設定
+      TZ: Asia/Tokyo
+  
+  # phpmyadmin service container: phpMyAdmin
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    logging:
+      driver: json-file
+    # 所属ネットワーク
+    networks:
+      - lampnet
+    # ポートフォワーディング
+    ports:
+      # http://localhost:${PMA_PORT} => service://phpmyadmin:80
+      - "${PMA_PORT:-8080}:80"
+    volumes:
+      - /sessions
+    environment:
+      PMA_ARBITRARY: 1
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: root
+  
+  # mailhog service container: local SMTP server + Mail catcher
+  mailhog:
+    image: mailhog/mailhog
+    logging:
+      driver: json-file
+    # 所属ネットワーク
+    networks:
+      - lampnet
+    # ポートフォワーディング
+    ports:
+      # http://localhost:${MAILHOG_PORT} => service://mailhog:8025
+      - "${MAILHOG_PORT:-8025}:8025"
+      # - "1025" # SMTP Port: ホスト側ポートはランダムに選出

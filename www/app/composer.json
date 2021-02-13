@@ -1,0 +1,6 @@
+{
+    "require": {
+        "fzaninotto/faker": "^1.9",
+        "robmorgan/phinx": "^0.12.4"
+    }
+}
